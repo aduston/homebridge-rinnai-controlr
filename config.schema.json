@@ -24,6 +24,20 @@
         "required": true,
         "default": "15"
       },
+      "forceRecirculation": {
+        "title": "Force Recirculation Switch",
+        "description": "Show the recirculation switch even if Rinnai does not report the device as recirculation capable",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "hideThermostat": {
+        "title": "Hide Thermostat",
+        "description": "Don't expose the water temperature thermostat to HomeKit, leaving only the recirculation switch",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
       "temperatureUnits": {
         "title": "Temperature Units",
         "description": "Celsius or Fahrenheit",

@@ -21,7 +21,6 @@ const RECIRC_SERVICE_NAME = 'Recirculation';
  * Each accessory may expose multiple services of different service types.
  */
 export class RinnaiControlrPlatformAccessory {
-    private service: Service;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private device: any;
     private readonly isFahrenheit: boolean;
@@ -59,17 +58,24 @@ export class RinnaiControlrPlatformAccessory {
             .setCharacteristic(this.platform.Characteristic.Model, this.device.model || UNKNOWN)
             .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.dsn || UNKNOWN);
 
-        this.service = this.accessory.getService(this.platform.Service.Thermostat)
-            || this.accessory.addService(this.platform.Service.Thermostat);
-        this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.device_name);
+        const thermostat = this.accessory.getService(this.platform.Service.Thermostat);
+        if (this.platform.getConfig().hideThermostat === true) {
+            if (thermostat) {
+                this.platform.log.info(`Removing Thermostat service from ${this.device.dsn} because hideThermostat is set.`);
+                this.accessory.removeService(thermostat);
+            }
+        } else {
+            const service = thermostat || this.accessory.addService(this.platform.Service.Thermostat);
+            service.setCharacteristic(this.platform.Characteristic.Name, this.device.device_name);
+            this.bindTemperature(service);
+            this.bindStaticValues(service);
+        }
 
-        this.bindTemperature();
         this.bindRecirculation();
-        this.bindStaticValues();
     }
 
-    bindTemperature() {
-        this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
+    bindTemperature(service: Service) {
+        service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
             .onSet(this.setTemperature.bind(this))
             .onGet(this.getTemperature.bind(this))
             .setProps({
@@ -79,7 +85,7 @@ export class RinnaiControlrPlatformAccessory {
             })
             .updateValue(this.temperature);
 
-        this.service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+        service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
             .onGet(this.getTemperature.bind(this))
             .updateValue(this.temperature)
             .setProps({
@@ -88,7 +94,7 @@ export class RinnaiControlrPlatformAccessory {
                 minStep: THERMOSTAT_STEP_VALUE,
             });
 
-        this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
+        service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
             .updateValue(this.platform.Characteristic.TargetHeatingCoolingState.HEAT)
             .setProps({
                 minValue: this.platform.Characteristic.TargetHeatingCoolingState.HEAT,
@@ -98,12 +104,15 @@ export class RinnaiControlrPlatformAccessory {
     }
 
     bindRecirculation() {
-        if (this.accessory.context.info?.recirculation_capable === API_VALUE_TRUE) {
-            this.platform.log.debug(`Device ${this.device.dsn} has recirculation capabilities. Adding service.`);
+        // Rinnai sometimes reports recirculation_capable as null for capable devices, so allow forcing it via config.
+        const forced = this.platform.getConfig().forceRecirculation === true;
+        if (forced || this.accessory.context.info?.recirculation_capable === API_VALUE_TRUE) {
+            this.platform.log.debug(`Device ${this.device.dsn} has recirculation capabilities${forced ? ' (forced by config)' : ''}. Adding service.`);
             const recircService = this.accessory.getService(RECIRC_SERVICE_NAME) ||
                 this.accessory.addService(this.platform.Service.Switch, RECIRC_SERVICE_NAME, `${this.device.dsn}-Recirculation`);
             recircService.getCharacteristic(this.platform.Characteristic.On)
-                .onSet(this.setRecirculateActive.bind(this));
+                .onSet(this.setRecirculateActive.bind(this))
+                .onGet(this.getRecirculateActive.bind(this));
             recircService.updateCharacteristic(this.platform.Characteristic.On,
                 this.device.shadow.recirculation_enabled);
         } else {
@@ -111,12 +120,12 @@ export class RinnaiControlrPlatformAccessory {
         }
     }
 
-    bindStaticValues() {
-        this.service.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits,
+    bindStaticValues(service: Service) {
+        service.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits,
             this.platform.getConfig().temperatureUnits === TemperatureUnits.F
                 ? this.platform.Characteristic.TemperatureDisplayUnits.FAHRENHEIT
                 : this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
-        this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+        service.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
             this.platform.Characteristic.CurrentHeatingCoolingState.HEAT);
     }
 
@@ -131,6 +140,14 @@ export class RinnaiControlrPlatformAccessory {
             [API_KEY_SET_RECIRCULATION_ENABLED]: (value as boolean),
         };
         await this.platform.setState(this.accessory, state);
+        setTimeout(() => {
+            this.platform.throttledPoll();
+        }, SET_STATE_WAIT_TIME_MILLIS);
+    }
+
+    async getRecirculateActive(): Promise<Nullable<CharacteristicValue>> {
+        this.platform.throttledPoll();
+        return this.device.shadow.recirculation_enabled === true;
     }
 
     async setTemperature(value: CharacteristicValue) {

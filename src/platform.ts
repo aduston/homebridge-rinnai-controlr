@@ -29,6 +29,8 @@ type RinnaiControlrConfig = {
     username: string;
     password: string;
     recirculationDuration: number;
+    forceRecirculation?: boolean;
+    hideThermostat?: boolean;
     temperatureUnits: TemperatureUnits;
     minimumTemperature: number;
     maximumTemperature: number;
@@ -109,12 +111,12 @@ export class RinnaiControlrHomebridgePlatform implements DynamicPlatformPlugin {
         }
     }
 
-    throttledPoll() {
-        const throttle = _.throttle(() => {
-            this.pollDeviceStatus();
-        }, API_POLL_THROTTLE_MILLIS);
+    private readonly throttle = _.throttle(() => {
+        this.pollDeviceStatus();
+    }, API_POLL_THROTTLE_MILLIS);
 
-        throttle();
+    throttledPoll() {
+        this.throttle();
     }
 
     getConfig(): RinnaiControlrConfig {
